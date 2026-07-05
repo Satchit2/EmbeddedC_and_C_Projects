@@ -1,0 +1,30 @@
+List of ideas to work on for projects:
+1) Run logger:
+A project to log a run based on time and distance using a sim or gps to track the path and use internal clock to track time.
+Additional Features:
+Compatibility with Strava (if possible)
+Fully Offline Mode
+Making the UI to see path on maps
+Auto Pause tracking if the user isnt moving
+
+2) Contactless Thermometer:
+A project to build infrared thermometer from scratch.
+Goals:
+To try and use non-commercial/different materials to track temprature
+Compare the performance with regular infrared thermometers
+Compare performance for different materials
+
+3) Ideal Plant Condition Analyser
+A project to log and study the plant conditions(Soil Moisture, Sunlight%, O2, CO2, Temprature) for 2 weeks and compare with ideal conditions.
+Goals:
+Log the data and store locally and transfer data to another device on demand.
+Create UI for intuitive comparision and improvemnets
+Add extra parameters if required
+
+4) Vertical Windmill:
+Continue the project.
+Goal:
+Design BMS to store the energy from the windmill in a Li-Ion battery.
+Build prototype
+Test Windmill robustness
+Design BMS to send power back to grid
