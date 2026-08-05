@@ -17,3 +17,10 @@
 ##### Version: v0.1 (in-progress)
 ##### Description: 
 Created basic placeholder functions and opaque object in the header file with its implementation present in the .c implement file. Yet to fully implement all the said things
+
+### *5 August:*
+
+##### Version: v0.1 (in-progress)
+##### Description: 
+Furthered the basic structure of the header and implementation file. Added basic error handling type and functions. Building implementation file functions using single exit structure.
+Created the Initializer for the json object. Currrently working on compatibility with the json format similar to trial.json in Data folder. 
