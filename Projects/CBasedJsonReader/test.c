@@ -4,6 +4,7 @@
 #include "Include/CJson.h"
 
 int main() {
+    CJsonCompat();
     jsonObj_t *configData;
     printError(createJsonObj(&configData,3,0));    
     return 0;

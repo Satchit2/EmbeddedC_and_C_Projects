@@ -24,3 +24,9 @@ Created basic placeholder functions and opaque object in the header file with it
 ##### Description: 
 Furthered the basic structure of the header and implementation file. Added basic error handling type and functions. Building implementation file functions using single exit structure.
 Created the Initializer for the json object. Currrently working on compatibility with the json format similar to trial.json in Data folder. 
+
+### *9 August:*
+
+##### Version: v0.1 (in-progress)
+##### Description: 
+Planned the structure to perform reading and dry ran SIMD format calculations along with learning SIMD commands. Implemented a custom compat checking function to make sure that device running the library can use SIMD functions.
