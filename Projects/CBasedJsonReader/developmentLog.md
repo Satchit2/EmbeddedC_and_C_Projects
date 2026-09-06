@@ -30,3 +30,9 @@ Created the Initializer for the json object. Currrently working on compatibility
 ##### Version: v0.1 (in-progress)
 ##### Description: 
 Planned the structure to perform reading and dry ran SIMD format calculations along with learning SIMD commands. Implemented a custom compat checking function to make sure that device running the library can use SIMD functions.
+
+### *7 September:*
+
+##### Version: v0.1 (in-progress)
+##### Description: 
+Created required SIMD Function compile time compat check. Also developed certain required helper functions and developed JSON to C struct parser for simple JSON files without arrays or nested objects. Planned testcases but yet to run them.
