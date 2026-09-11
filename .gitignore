@@ -3,3 +3,5 @@ C Coding Problems/*.exe
 C Coding Problems/ProjectEuler/*.exe
 Projects/CBJR_Bin
 Projects/CBasedJsonReader/*.exe
+Projects/CBasedJsonReader/test2.c
+Projects/CBasedJsonReader/Include/privateInfo.h

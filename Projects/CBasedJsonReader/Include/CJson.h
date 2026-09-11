@@ -42,6 +42,13 @@ Requirements: compile the code with flag -march=native when using gcc and use fu
 #warning "This device doesn't support AVX2 and SSE4.1 Intrinsics used in the library" //SET TO ERROR, POST TESTING
 #endif
 
+
+/*
+==============================================================================================================================
+                                        DATA DECLARATIONS & DEFINITION
+==============================================================================================================================
+*/
+
 //Error Enum
 typedef enum cjson_err {
     CJ_ERR_OK,
@@ -53,16 +60,38 @@ typedef enum cjson_err {
     CJ_ERR_NOCOMPAT,
     CJ_ERR_FULL,
     CJ_ERR_FAIL_RESIZE,
+    CJ_ERR_FAIL_OBJ_WR, //Failed Object write
+    CJ_ERR_DATACOR, //Corruption of json obj
     CJ_ERR_INVCODE,
 }cjson_err_t;
 
+//Value Type Enum
+typedef enum valueTypes {
+    STRING,
+    ARRAY,
+    OBJECT
+}valueType_t;
+
 //Opaque Type Struct
 typedef struct jsonObj jsonObj_t;
+typedef union valueData value_t;
 
-//Public Functions
+//Public Type Struct
+
+typedef struct keyValuePair {
+    char* key;
+    value_t value;
+    valueType_t valueType;
+}kv_t;
+
+typedef struct linkedKeyValuePair {
+    char* key;
+    value_t* value;
+    valueType_t* valueType;
+}lkv_t;
 
 
-//Error Display Functions
+//======================================== Errror Display Functions ========================================
 
 //Error Display Function mapped from macro. It prints error statement to STDOUT and returns verbose error. Entering invalid errno is 
 extern const char* printError__(cjson_err_t errorCode, int lineNum, const char* funcName, const char* fileName);
@@ -72,20 +101,42 @@ extern const char* getErrorV(cjson_err_t errorCode);
 //Compatibility Functions
 extern void CJsonCompat();
 
-//Json Functions
+/*
+==============================================================================================================================
+                                              CJSON FUNCTIONS
+==============================================================================================================================
+*/
+
+//======================================== Object Creation Functions ========================================
 
 //Create json obj to be used in the project. If isDynamic is 0 then the property count will be fixed and if the number of properties mismatch between json file and object 
 //can cause unintended behaviour when using readJsonObj like memory corruption. The memory step-size of dynamic realloc can be changed by defining step size using DYNAMIC_STEP.
 extern cjson_err_t createJsonObj(jsonObj_t** dataObj, int propertyCount, bool isDynamic);
 //Free all the memeory associated with the json obj
 extern cjson_err_t destroyJsonObj(jsonObj_t* dataObj);
+
+
+
+//========================================= Object Status Functions ==========================================
+
 //Set default stepsize for dynamic resizing to N
 extern cjson_err_t setResizeStep(jsonObj_t* dataObj, int stepSize);
 //Set the object to dynamic size with stepsize N
 extern cjson_err_t setDynamicSize(jsonObj_t* dataObj, int stepSize);
 //Fix the Object to current size
 extern cjson_err_t unsetDynamicSize(jsonObj_t* dataObj);
+
+
+
+//======================================== Object Processing Functions ========================================
+
 //Load a .json file into a program interactable C structure
 extern cjson_err_t readJsonFile(char* filepath, jsonObj_t* dataObj);
+//Read print the key-value pair at index. If index is passed as -1, it will print all values. Index starts at 1
+extern cjson_err_t printJsonProperty(jsonObj_t* dataObj, int index);
+//Deep copy the keyvalue pair of the given index to the passed pointer to an initialised kv_t variable. Index starts at 1. 
+extern cjson_err_t getJsonProperty(jsonObj_t* dataObj, int index, kv_t* dataHolder);
+//link the member of the Json Object at given index to the initialised lkv_t variable. Index starts at 1. 
+extern cjson_err_t linkJsonProperty(jsonObj_t* dataObj, int index, lkv_t* dataHolder);
 
 #endif

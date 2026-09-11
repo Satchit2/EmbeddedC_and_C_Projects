@@ -8,6 +8,8 @@
 #define DYNAMIC_STEP 2
 #define MAX_PROPERTY_COUNT__ 32
 #define MAX_READBUFFER_SIZE__ 256
+#define DEFAULT_ARRAY_SIZE 8
+#define ARRAY_STEP_SIZE 2
 
 //Constant Macros
 //Ascii Macros
@@ -39,24 +41,39 @@
 //Typdefs
 
 typedef unsigned char bit8_t; // To prevent collision with <stdint.h> type uint8_t
+
+#if __SIZEOF_LONG__==8
+typedef unsigned long mask_t;
+#define MASK_SIZE 8
+#elif __SIZEOF_LONG_LONG__==8
+typedef unsigned long long mask_t;
+#define MASK_SIZE 8
+#elif __SIZEOF_LONG_LONG__==4
+typedef unsigned long long mask_t;
+#define MASK_SIZE 4
+#else
+#error "Unable to set up mask as long long is less than 4 bytes"
+#endif
+
 //Enum Typedefs
 
-//Type can be done using enums but I want to do it with bit flags as enums are 4 bytes, flag can do it in 1 byte(3 bits to be exact) [Nvm, I will require both]
-typedef enum valueTypes {
-    STRING,
-    ARRAY,
-    OBJECT
-}value_t;
-
 //Library Structs
+typedef struct jsonArrayData {
+    void *arrayHolder;
+    int arraySize;
+    mask_t *mask; //Array Mask | 1-isObject | 0-string 
+}jArray_t;
+
+union valueData {
+    char* stringPtr;
+    jArray_t* arrayPtr;
+    jsonObj_t* objectPtr;  
+};
+
 typedef struct data {
     char *key;
-    union valueData {
-      char* stringPtr;
-      char** arrayPtr;
-      jsonObj_t* objectPtr;  
-    } *val;
-    value_t valType;
+    value_t val;
+    valueType_t valType;
     unsigned int objIndex; //The index of array with object is 1
 }data_t;
 
@@ -67,6 +84,7 @@ typedef struct jsonLineData {
     bit8_t valueEnd;
     bool isArray;
     bool isObject;
+    bool isEnd;
 }lineData_t;
 
 struct jsonObj {
@@ -88,6 +106,8 @@ const char* verboseErr[]={
     "CJ_ERR_NOCOMPAT: Library is incompatible with your device",
     "CJ_ERR_FULL: JSON object is full. File reading terminated.",
     "CJ_ERR_FAIL_RESIZE: JSON object Failed to resize. Max size reached.",
+    "CJ_ERR_FAIL_OBJ_WR: Failed to write data to json object",
+    "CJ_ERR_DATACOR: Data in structure is corrupted"
     "CJ_ERR_INVCODE: Invalid error code",
 };
 
@@ -102,8 +122,8 @@ static int sslenAligned(const char* str) {
     __m256i nullVec = _mm256_setzero_si256();
     unsigned int len=0,mask=0;
     do {
-        __m256i data = _mm256_loadu_epi8(str+len);
-        mask = _mm256_cmpeq_epi8_mask(data,nullVec);
+        __m256i data = _mm256_loadu_si256((const __m256i*)(str+len));
+        mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(data,nullVec));
         len = (mask==0)?len:len+MAX_VECTOR_SIZE__;
     } while (mask==0 && len<MAX_READBUFFER_SIZE__);
     len+=__builtin_ctz(mask);
@@ -111,7 +131,7 @@ static int sslenAligned(const char* str) {
 }
 
 //SIMD based deep copy [not as good as memcpy()] | Assumes: all passed pointers have memory equivalent to multiple of MAX_VECTOR_SIZE__
-static bool deep32ncpy(const char* srcStr, char* destStr, int byteNum) {
+static bool deep32ncpy(const char* restrict srcStr, char* restrict destStr, int byteNum) {
     int iteCount = (byteNum%MAX_VECTOR_SIZE__==0)?byteNum/MAX_VECTOR_SIZE__:(byteNum/MAX_VECTOR_SIZE__)+1;
     
 }
@@ -145,9 +165,8 @@ static void deepNCopy(const char* restrict src, char* restrict dest, int N) {
     #endif
 
     while ((N-cnt)>0) {
-        __m256i srcBuffer = _mm256_loadu_si256((const __m256i_u*)(src+cnt));
-        _mm256_storeu_si256((__m256i_u*)(dest+cnt),srcBuffer);
-        cnt+=YMM_SIZE;
+        *(dest+cnt)=*(src+cnt);
+        ++cnt;
     }
 }
 
@@ -174,18 +193,18 @@ static cjson_err_t parseBufferLine(char* buffer, lineData_t* lineData, bool isAc
 
     while (bufferSize>=cnt) {
         __m256i_u bufferVec = _mm256_loadu_si256((__m256i_u*)(buffer+cnt));
-        dQuotesMask = _mm256_cmpeq_epi8_mask(bufferVec,doubleQuotesArr);
-        colonMask = _mm256_cmpeq_epi8_mask(bufferVec,colonArr);
-        commaMask = _mm256_cmpeq_epi8_mask(bufferVec,commaArr);
+        dQuotesMask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(bufferVec,doubleQuotesArr));
+        colonMask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(bufferVec,colonArr));
+        commaMask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(bufferVec,commaArr));
 
         if (dQuotesMask==0 || colonMask==0 || commaMask==0) {setErr(CJ_ERR_INVFRMT);} //Again once Array and Obj check is implemented we cant use the comma mask = 0 clause
 
         while (dQuotesMask!=0) {
             indexHolder=__builtin_ctz(dQuotesMask)+cnt;
-            setIntBit0(dQuotesMask,indexHolder-cnt+1);
+            setIntBit0(dQuotesMask,indexHolder);
             
             //Escape character check.
-            if (*(buffer+cnt+indexHolder-2)=='\\') {continue;}
+            if (*(buffer+cnt+indexHolder-1)=='\\') {continue;}
 
             switch(iteration) {
                 case 0: 
@@ -193,7 +212,7 @@ static cjson_err_t parseBufferLine(char* buffer, lineData_t* lineData, bool isAc
                 break;
 
                 case 1: 
-                lineData->propertyKeyEnd=(lineData->propertyKeyStart==(cnt+indexHolder))?cnt+indexHolder:cnt+indexHolder-1;
+                lineData->propertyKeyEnd=cnt+indexHolder;
                 break;
 
                 case 2: 
@@ -201,7 +220,7 @@ static cjson_err_t parseBufferLine(char* buffer, lineData_t* lineData, bool isAc
                 break;
 
                 case 3: 
-                lineData->valueEnd=(lineData->valueStart==(cnt+indexHolder))?cnt+indexHolder:cnt+indexHolder-1;
+                lineData->valueEnd=cnt+indexHolder;
                 break;
 
                 default:
@@ -214,7 +233,7 @@ static cjson_err_t parseBufferLine(char* buffer, lineData_t* lineData, bool isAc
         //This is purely for input validation
         while (colonMask!=0 && colonIndex==0 && lineData->propertyKeyEnd!=BIT8_T_MAX__) {
             indexHolder=__builtin_ctz(colonMask)+cnt;
-            setIntBit0(colonMask,indexHolder-cnt+1);
+            setIntBit0(colonMask,indexHolder);
 
             if (indexHolder>lineData->propertyKeyEnd && indexHolder<lineData->valueStart) {
                 colonIndex=indexHolder;
@@ -224,7 +243,7 @@ static cjson_err_t parseBufferLine(char* buffer, lineData_t* lineData, bool isAc
 
         while (commaMask!=0 && commaIndex==0 && lineData->valueEnd!=BIT8_T_MAX__) {
             indexHolder=__builtin_ctz(colonMask)+cnt;
-            setIntBit0(commaMask,indexHolder-cnt+1);
+            setIntBit0(commaMask,indexHolder);
 
             if (indexHolder>lineData->valueEnd) {
                 commaIndex=indexHolder;
@@ -238,11 +257,14 @@ static cjson_err_t parseBufferLine(char* buffer, lineData_t* lineData, bool isAc
     //To verify the Colon and comma are in correct place. This wont hold once we have nested objects.
     if (colonIndex==0 || commaIndex==0) {setErr(CJ_ERR_INVFRMT);}
 
+    //Put a check to if array or nested object ends
+    lineData->isEnd=true;
+
     Done:
     return errVal;
 }
 
-cjson_err_t resizeObject(jsonObj_t* objPtr) {
+static cjson_err_t resizeObject(jsonObj_t* objPtr) {
     cjson_err_t errVal = CJ_ERR_OK;
 
     data_t **temp = realloc(objPtr->jsonData,(objPtr->maxSize+objPtr->stepSize)*(sizeof(data_t*)));
@@ -250,6 +272,91 @@ cjson_err_t resizeObject(jsonObj_t* objPtr) {
 
     objPtr->jsonData=temp;
     objPtr->maxSize+=objPtr->stepSize;
+
+    Done:
+    return errVal;
+}
+
+static inline void createDataObject(data_t** objectAddress, lineData_t* bufferInfo, char* buffer, int index) {
+
+    *objectAddress=NULL;
+
+    data_t *newObject = malloc(sizeof(data_t));
+    if (newObject==NULL) {goto Done;}
+
+
+    newObject->key=(bufferInfo->propertyKeyStart==bufferInfo->propertyKeyEnd)?EMPTY_VALUE:calloc(bufferInfo->propertyKeyEnd-bufferInfo->propertyKeyStart+1,1);
+    if (newObject->key==NULL) {goto Clean;}
+    deepNCopy(buffer+bufferInfo->propertyKeyStart,newObject->key,bufferInfo->propertyKeyEnd-bufferInfo->propertyKeyStart);
+
+    //Doesn't support array of objects and incomplete logic build for handling arrays and objects. It is like place holder for now
+    if (bufferInfo->isArray==true) {
+        //Incomplete logic. Need a check for array start and end and increase the property count as per it
+        newObject->valType=ARRAY;
+
+    } else  if (bufferInfo->isObject==true) {
+        //Incomplete logic. Need a check for object start and end and increase the property count as per it
+        newObject->valType=OBJECT;
+    } else {
+        newObject->valType=STRING;
+        newObject->val.stringPtr=(bufferInfo->valueStart==bufferInfo->valueEnd)?EMPTY_VALUE:calloc(bufferInfo->valueEnd-bufferInfo->valueStart+1,1);
+        if (newObject->val.stringPtr==NULL) {goto Clean;}
+        deepNCopy(buffer+bufferInfo->valueStart,newObject->val.stringPtr,bufferInfo->valueEnd-bufferInfo->valueStart);
+    }
+
+    newObject->objIndex=index;
+
+    *objectAddress=newObject;
+    goto Done;
+
+    Clean:
+    if (newObject->key!=NULL) {free(newObject->key);}
+    free(newObject);
+    Done:
+    return;
+}
+
+static inline cjson_err_t printObj(data_t *obj) {
+    cjson_err_t errVal=CJ_ERR_OK;
+    printf("Key: %s\n");
+    
+    switch(obj->valType) {
+        case STRING:
+        printf("Value: %s\n",obj->val.stringPtr);
+        break;
+
+
+        case ARRAY:
+        //TBA
+        break;
+
+
+        case OBJECT:
+        if ((errVal=printJsonObj(obj->val.objectPtr,-1))!=CJ_ERR_OK) {
+            printError(errVal);
+            goto Done;
+        }
+        break;
+
+
+        default:
+        printError(CJ_ERR_DATACOR);
+        setErr(CJ_ERR_DATACOR);
+        break;
+    }
+
+    Done:
+    return;
+}
+
+//deep copies pointer and returns 0 on success and 1 on failure to allocate mem
+static inline bit8_t deepCopyPointer(const bit8_t* restrict srcPtr, bit8_t* restrict destPtr, int size) {
+    bit8_t errVal=0;
+
+    destPtr=malloc(size);
+    if (destPtr==NULL) {setErr(1);}
+
+    deepNCopy(srcPtr,destPtr,size);
 
     Done:
     return errVal;
@@ -268,7 +375,7 @@ void CJsonCompat() {
     if (AVX_FUNC_COMPAT==0) {
         printf("This library uses AVX Functions which arent supported by this device. Hopefully in next upgrade cross compatibility is added\n");
         exit(CJ_ERR_NOCOMPAT);
-    } else if (MAX_READBUFFER_SIZE__%32==0) {
+    } else if (MAX_READBUFFER_SIZE__%32!=0) {
         printf("This library max read buffer is set to %d which is not compatible with SIMD functions used. Do not use MAX_READBUDDER_SIZE__ in global definitions\n",MAX_READBUFFER_SIZE__);
         exit(CJ_ERR_NOCOMPAT);
     }
@@ -350,25 +457,11 @@ cjson_err_t readJsonFile(char* filepath, jsonObj_t* dataObj) {
 
         parseBufferLine(readBuffer,bufferData,isArray,isObject);
 
-        currentData->key=(bufferData->propertyKeyStart==bufferData->propertyKeyEnd)?EMPTY_VALUE:malloc(bufferData->propertyKeyEnd-bufferData->propertyKeyStart);
-        if (currentData->key==NULL) {cleanErr(CJ_ERR_INIT_FAIL);}
-        deepNCopy(readBuffer+bufferData->propertyKeyStart,currentData->key,bufferData->propertyKeyEnd-bufferData->propertyKeyStart);
+        createDataObject(&currentData,bufferData,readBuffer,dataObj->propertyCount);
 
-        //Doesn't support array of objects and incomplete logic build for handling arrays and objects. It is like place holder for now
-        if (bufferData->isArray==true) {
-            //Incomplete logic. Need a check for array start and end and increase the property count as per it
-            currentData->valType=ARRAY;
+        if (currentData==NULL) {cleanErr(CJ_ERR_FAIL_OBJ_WR);}
 
-        } else  if (bufferData->isObject==true) {
-            //Incomplete logic. Need a check for object start and end and increase the property count as per it
-            currentData->valType=OBJECT;
-        } else {
-            currentData->valType=STRING;
-            currentData->val->stringPtr=(bufferData->valueStart==bufferData->valueEnd)?EMPTY_VALUE:malloc(bufferData->valueEnd-bufferData->valueStart);
-            if (currentData->val->stringPtr==NULL) {cleanErr(CJ_ERR_INIT_FAIL);}
-            deepNCopy(readBuffer+bufferData->valueStart,currentData->val->stringPtr,bufferData->valueEnd-bufferData->valueStart);
-            ++(dataObj->propertyCount);
-        }
+        if (bufferData->isEnd==true) {++(dataObj->propertyCount);}
     }
 
 
@@ -411,6 +504,67 @@ cjson_err_t unsetDynamicSize(jsonObj_t* dataObj) {
     
     dataObj->isDynamic=false;
     dataObj->stepSize=0;
+
+    Done:
+    return errVal;
+}
+
+//Read print the key-value pair at index. If index is passed as -1, it will print all values
+cjson_err_t printJsonProperty(jsonObj_t* dataObj, int index) {
+    cjson_err_t errVal=CJ_ERR_OK;
+
+    //Verify If a valid index
+    if (index>dataObj->propertyCount) {setErr(CJ_ERR_INVARG);}
+
+    switch(index) {
+        case -1:
+        for (int i=0;i<dataObj->propertyCount;i++) {
+            if ((errVal=printObj(*(dataObj->jsonData+i)))!=CJ_ERR_OK) {
+                goto Done;
+            }
+        }
+        break;
+
+
+        default:
+        data_t *obj=*(dataObj->jsonData+index-1);
+        if (obj->objIndex!=index) {setErr(CJ_ERR_DATACOR);}
+
+        errVal=printObj(obj);
+        break;
+    }
+
+    Done:
+    return errVal;
+}
+
+//Load the keyvalue pair of the given index to the passed pointer to an initialised kv_t variable
+cjson_err_t getJsonProperty(jsonObj_t* dataObj, int index, kv_t* dataHolder) {
+    cjson_err_t errVal=CJ_ERR_OK;
+
+    if (index>dataObj->propertyCount && index>0) {setErr(CJ_ERR_INVARG);}
+
+    data_t *obj= *(dataObj->jsonData+index-1);
+
+    if (deepCopyPointer(obj->key,dataHolder->key,sslenAligned(obj->key)+1)!=0) {setErr(CJ_ERR_INIT_FAIL);}
+    dataHolder->value=obj->val;
+    dataHolder->valueType=obj->valType;
+
+    Done:
+    return errVal;
+}
+
+//link the member of the Json Object at given index to the initialised lkv_t variable. Index starts at 1. 
+cjson_err_t linkJsonProperty(jsonObj_t* dataObj, int index, lkv_t* dataHolder) {
+    cjson_err_t errVal=CJ_ERR_OK;
+
+    if (index>dataObj->propertyCount && index>0) {setErr(CJ_ERR_INVARG);}
+
+    data_t *obj= *(dataObj->jsonData+index-1);
+
+    dataHolder->key=obj->key;
+    dataHolder->value=&obj->val;
+    dataHolder->valueType=&obj->valType;
 
     Done:
     return errVal;

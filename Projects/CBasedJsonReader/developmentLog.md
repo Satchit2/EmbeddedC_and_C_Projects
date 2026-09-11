@@ -36,3 +36,9 @@ Planned the structure to perform reading and dry ran SIMD format calculations al
 ##### Version: v0.1 (in-progress)
 ##### Description: 
 Created required SIMD Function compile time compat check. Also developed certain required helper functions and developed JSON to C struct parser for simple JSON files without arrays or nested objects. Planned testcases but yet to run them.
+
+### *11 September:*
+
+##### Version: v0.1 (in-progress)
+##### Description: 
+Created basic functions for interacting with the json objects in the main program. Added support for basic properties with string values. Will add writing to the object and similar capablities over the weekend. Array can be nested with multiple data types and support for it needs to be figured out.
